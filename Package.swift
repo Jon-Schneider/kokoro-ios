@@ -19,7 +19,10 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.29.1"),
     // .package(url: "https://github.com/mlalma/eSpeakNGSwift", from: "1.0.1"),
-    .package(url: "https://github.com/mlalma/MisakiSwift", from: "1.0.4"),
+    .package(
+      url: "https://github.com/Jon-Schneider/MisakiSwift",
+      branch: "jsc/2026-06-08--static-package-product"
+    ),
     .package(
       url: "https://github.com/Jon-Schneider/MLXUtilsLibrary.git",
       branch: "jsc/2026-06-08--static-package-product"
