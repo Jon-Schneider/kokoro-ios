@@ -11,7 +11,8 @@ let package = Package(
   products: [
     .library(
       name: "KokoroSwift",
-      type: .dynamic,
+      // Static linkage keeps MLX's generic Swift symbols available to release builds.
+      type: .static,
       targets: ["KokoroSwift"]
     ),
   ],
