@@ -20,7 +20,10 @@ let package = Package(
     .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.29.1"),
     // .package(url: "https://github.com/mlalma/eSpeakNGSwift", from: "1.0.1"),
     .package(url: "https://github.com/mlalma/MisakiSwift", from: "1.0.4"),
-    .package(url: "https://github.com/mlalma/MLXUtilsLibrary.git", from: "0.0.6")
+    .package(
+      url: "https://github.com/Jon-Schneider/MLXUtilsLibrary.git",
+      branch: "jsc/2026-06-08--static-package-product"
+    )
   ],
   targets: [
     .target(
