@@ -5,6 +5,7 @@ import Foundation
 import MLX
 import MLXNN
 import MLXUtilsLibrary
+import os
 
 /// Main class that encapsulates the complete Kokoro text-to-speech pipeline.
 ///
@@ -165,6 +166,29 @@ public final class KokoroTTS {
   /// - Returns: Array of audio samples as Float values
   /// - Throws: `KokoroTTSError.tooManyTokens` if text is too long,
   ///           or `G2PProcessorError` if G2P processing fails
+  /// Logger for narration generation diagnostics. The `generateAudio` graph is otherwise built lazily and
+  /// only materialized at the final `asArray`, which makes a single pathological intermediate impossible to
+  /// attribute. `evalStage` forces evaluation at each boundary so the offending tensor is both bounded and
+  /// named in the log.
+  private static let generationLog = Logger(subsystem: "KokoroSwift", category: "Generation")
+
+  /// Forces evaluation of an intermediate and logs its shape alongside current MLX memory use.
+  ///
+  /// MLX is lazy: without this, every intermediate from BERT through the decoder stays live until the final
+  /// `asArray`, so the peak working set is the sum of *all* stages at once. Evaluating stage by stage lets
+  /// earlier intermediates be released before later ones are computed, capping peak memory, and surfaces which
+  /// stage's tensor is oversized when a shape/broadcast bug is present.
+  @discardableResult
+  private func evalStage(_ label: String, _ array: MLXArray) -> MLXArray {
+    MLX.eval(array)
+    let snapshot = Memory.snapshot()
+    let toMB = { (bytes: Int) in bytes / (1024 * 1024) }
+    Self.generationLog.debug(
+      "stage \(label, privacy: .public) shape=\(array.shape.description, privacy: .public) activeMB=\(toMB(snapshot.activeMemory)) peakMB=\(toMB(snapshot.peakMemory))"
+    )
+    return array
+  }
+
   public func generateAudio(voice: MLXArray, language: Language, text: String, speed: Float = 1.0) throws -> ([Float], [MToken]?) {
     // Update language if it has changed
     try updateLanguageIfNeeded(language)
@@ -190,24 +214,36 @@ public final class KokoroTTS {
       textMask: textMask,
       style: globalStyle
     )
-    
+    evalStage("durationFeatures", durationFeatures)
+
     // Step 5: Predict phoneme durations
     let (predictedDurations, alignmentTarget) = predictDurations(
       features: durationFeatures,
       batchSize: paddedInputIds.shape[1],
       speed: speed
     )
-    
+    // Total frames (sum of per-phoneme durations) drives the size of every downstream tensor; log it so a
+    // duration runaway is visible directly.
+    evalStage("predictedDurations", predictedDurations)
+    let totalFrames: Int = predictedDurations.sum().item()
+    Self.generationLog.debug("totalFrames=\(totalFrames)")
+    evalStage("alignmentTarget", alignmentTarget)
+
     // Step 6: Generate aligned encodings
     let alignedEncoding = durationFeatures.transposed(0, 2, 1).matmul(alignmentTarget)
-    
+    evalStage("alignedEncoding", alignedEncoding)
+
     // Step 7: Predict prosody (F0, pitch)
     let (f0Prediction, nPrediction) = prosodyPredictor.F0NTrain(x: alignedEncoding, s: globalStyle)
-    
+    evalStage("f0Prediction", f0Prediction)
+    evalStage("nPrediction", nPrediction)
+
     // Step 8: Encode text for decoder
     let textEncoding = textEncoder(paddedInputIds, inputLengths: inputLengths, m: textMask)
+    evalStage("textEncoding", textEncoding)
     let asrFeatures = MLX.matmul(textEncoding, alignmentTarget)
-    
+    evalStage("asrFeatures", asrFeatures)
+
     // Step 9: Generate audio
     let audio = decoder(
       asr: asrFeatures,
@@ -215,7 +251,8 @@ public final class KokoroTTS {
       N: nPrediction,
       s: acousticStyle
     )[0]
-    
+    evalStage("audio", audio)
+
     // Try to predict timestamp of each token if G2P processor returns tokens
     if let tokenArray {
       TimestampPredictor.preditTimestamps(tokens: tokenArray, predictionDuration: predictedDurations)
