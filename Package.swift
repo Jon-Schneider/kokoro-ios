@@ -42,7 +42,14 @@ let package = Package(
         .product(name: "MLXUtilsLibrary", package: "MLXUtilsLibrary")
       ],
       resources: [
-       .copy("../../Resources/")
+       // Reference config.json directly (not the enclosing `Resources/` folder) so it
+       // lands at the bundle root. Declaring the directory — via either `.copy` or
+       // `.process` — reproduces the `Resources/` subdirectory inside the product bundle.
+       // Deep (macOS/Mac Catalyst) bundles tolerate that, but on iOS it yields a shallow
+       // bundle with a `Resources/` folder next to a top-level Info.plist, which `codesign`
+       // rejects: "bundle format unrecognized, invalid, or unsuitable". A flat layout is
+       // valid on every platform.
+       .process("../../Resources/config.json")
       ]
     ),
     .testTarget(
